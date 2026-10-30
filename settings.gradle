@@ -4,6 +4,9 @@ pluginManagement {
             url = uri("https://repo.kyngs.xyz/gradle-plugins")
         }
         gradlePluginPortal()
+        // Pillage: libby-gradle-plugin 1.2.1 is no longer served by repo.kyngs.xyz; build it from
+        // https://github.com/kyngs/libby-gradle-plugin (commit 071a725) with publishToMavenLocal. See PILLAGE-PATCH.md.
+        mavenLocal()
     }
 }
 

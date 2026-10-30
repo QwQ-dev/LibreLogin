@@ -220,7 +220,8 @@ public abstract class AuthenticLibreLogin<P, S> implements LibreLoginPlugin<P, S
     }
 
     protected void enable() {
-        version = SemanticVersion.parse(getVersion());
+        // Pillage: "0.24.0-pillage.1" is not a SemanticVersion; parse the upstream part, getVersion() keeps the suffix
+        version = SemanticVersion.parse(getVersion().replaceFirst("-pillage\\.\\d+$", ""));
         if (logger == null) logger = provideLogger();
 
         try {

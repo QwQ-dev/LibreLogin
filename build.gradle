@@ -4,7 +4,7 @@ plugins {
 
 defaultTasks 'updateLicenses', 'shadowJar'
 
-version '0.24.0'
+version '0.24.0-pillage.1' // Pillage: patched build, see PILLAGE-PATCH.md
 
 subprojects {
     version = rootProject.version

@@ -81,6 +81,19 @@ public class AuthenticListeners<Plugin extends AuthenticLibreLogin<P, S>, P, S> 
         try {
             mojangData = plugin.getPremiumProvider().getUserForName(username);
         } catch (PremiumException e) {
+            // Pillage: Mojang is unreachable. A name we already know with exactly these capitals is decided
+            // from our own row: premium rows stay online (the Velocity profile check refuses a different
+            // Mojang account), offline rows go to /login or /register. Unknown names are denied as before.
+            var known = plugin.getDatabaseProvider().getByName(username);
+            if (known != null && known.getLastNickname().contentEquals(username)) {
+                if (known.getPremiumUUID() != null) {
+                    plugin.getLogger().warn("Mojang API unavailable (%s), letting %s in as premium from the stored row".formatted(e.getIssue(), username));
+                    return new PreLoginResult(PreLoginState.FORCE_ONLINE, null, known);
+                }
+                plugin.getLogger().warn("Mojang API unavailable (%s), letting %s in as offline from the stored row".formatted(e.getIssue(), username));
+                return new PreLoginResult(PreLoginState.FORCE_OFFLINE, null, null);
+            }
+
             var message = switch (e.getIssue()) {
                 case THROTTLED -> plugin.getMessages().getMessage("kick-premium-error-throttled");
                 default -> {
@@ -195,6 +208,13 @@ public class AuthenticListeners<Plugin extends AuthenticLibreLogin<P, S>, P, S> 
                 ));
             }
         } else if (generate) {
+            // Pillage: unreliable premium data (a fallback API returned another name) must not register anyone,
+            // neither as premium nor as offline under the premium UUID. Ask the player to retry.
+            if (premiumUser != null && !premiumUser.reliable()) {
+                plugin.getLogger().warn("The premium data for %s is not reliable, refusing the login instead of registering it".formatted(username));
+                throw new InvalidCommandArgument(plugin.getMessages().getMessage("kick-premium-error-undefined"));
+            }
+
             var minLength = plugin.getConfiguration().get(ConfigurationKeys.MINIMUM_USERNAME_LENGTH);
             if (username.length() < minLength) {
                 throw new InvalidCommandArgument(plugin.getMessages().getMessage("kick-short-username",
@@ -213,9 +233,12 @@ public class AuthenticListeners<Plugin extends AuthenticLibreLogin<P, S>, P, S> 
                 }
             }
 
+            // Pillage: only a row that is really registered as premium may take the premium UUID; every other
+            // row (auto-register off included) gets the offline UUID, and the conflict check below uses that UUID.
+            var registerPremium = premiumUser != null && premiumUser.reliable() && plugin.getConfiguration().get(ConfigurationKeys.AUTO_REGISTER);
             var newID = plugin.generateNewUUID(
                     username,
-                    premiumUser == null ? null : premiumUser.uuid()
+                    registerPremium ? premiumUser.uuid() : null
             );
 
             var conflictingUser = plugin.getDatabaseProvider().getByUUID(newID);
@@ -226,7 +249,7 @@ public class AuthenticListeners<Plugin extends AuthenticLibreLogin<P, S>, P, S> 
                 ));
             }
 
-            if (premiumUser != null && premiumUser.reliable() && plugin.getConfiguration().get(ConfigurationKeys.AUTO_REGISTER)) {
+            if (registerPremium) { // Pillage: same condition as above, computed once
                 if (!premiumUser.name().contentEquals(username)) {
                     throw new InvalidCommandArgument(plugin.getMessages().getMessage("kick-invalid-case-username",
                             "%username%", premiumUser.name()

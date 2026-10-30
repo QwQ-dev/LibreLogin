@@ -8,7 +8,9 @@ package xyz.kyngs.librelogin.velocity;
 
 import com.velocitypowered.api.event.PostOrder;
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.ResultedEvent;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
+import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.connection.PreLoginEvent;
 import com.velocitypowered.api.event.player.GameProfileRequestEvent;
@@ -21,12 +23,14 @@ import com.velocitypowered.api.util.GameProfile;
 import io.netty.channel.Channel;
 import io.netty.util.AttributeKey;
 import net.kyori.adventure.text.Component;
+import org.jetbrains.annotations.Nullable;
 import xyz.kyngs.librelogin.api.event.exception.EventCancelledException;
 import xyz.kyngs.librelogin.common.config.ConfigurationKeys;
 import xyz.kyngs.librelogin.common.listener.AuthenticListeners;
 import xyz.kyngs.librelogin.common.util.GeneralUtil;
 
 import java.lang.reflect.Field;
+import java.net.InetSocketAddress;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
@@ -36,6 +40,9 @@ public class VelocityListeners extends AuthenticListeners<VelocityLibreLogin, Pl
     private static final Field INITIAL_MINECRAFT_CONNECTION;
     private static final Field INITIAL_CONNECTION_DELEGATE;
     private static final Field CHANNEL;
+
+    // Pillage: online UUID must match the stored premium UUID
+    private final PremiumProfileGuard premiumProfileGuard = new PremiumProfileGuard();
 
     static {
         try {
@@ -98,7 +105,33 @@ public class VelocityListeners extends AuthenticListeners<VelocityLibreLogin, Pl
 
         var gProfile = event.getOriginalProfile();
 
+        // Pillage: in online mode the original profile id is the Mojang-authenticated UUID. If the row found by
+        // name belongs to another premium account, do not hand out its UUID; onLogin refuses the connection.
+        if (!premiumProfileGuard.allowStoredProfile(event.getConnection().getRemoteAddress(), gProfile.getName(), event.isOnlineMode(), gProfile.getId(), profile)) {
+            plugin.getLogger().warn("Refusing %s: Mojang UUID %s does not match the stored premium UUID %s".formatted(gProfile.getName(), gProfile.getId(), profile.getPremiumUUID()));
+            return;
+        }
+
         event.setGameProfile(new GameProfile(profile.getUuid(), gProfile.getName(), gProfile.getProperties()));
+    }
+
+    // Pillage: deny the logins flagged in onProfileRequest. LAST so no other listener can allow them again.
+    @Subscribe(order = PostOrder.LAST)
+    public void onLogin(LoginEvent event) {
+        var player = event.getPlayer();
+        var refusal = loginRefusal(player.getRemoteAddress(), player.getUsername());
+        if (refusal != null) event.setResult(ResultedEvent.ComponentResult.denied(refusal));
+    }
+
+    // Pillage: package-private for tests (a Velocity Player cannot be mocked against adventure 4.14.0)
+    @Nullable
+    Component loginRefusal(InetSocketAddress address, String username) {
+        var nickname = premiumProfileGuard.takeMismatch(address, username);
+        if (nickname == null) return null;
+
+        return plugin.getMessages().getMessage("kick-name-mismatch",
+                "%nickname%", nickname
+        );
     }
 
     @Subscribe(order = PostOrder.LAST)

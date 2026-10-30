@@ -33,10 +33,20 @@ public class AuthenticPremiumProvider implements PremiumProvider {
     private final AuthenticLibreLogin<?, ?> plugin;
 
     public AuthenticPremiumProvider(AuthenticLibreLogin<?, ?> plugin) {
+        this(plugin, null);
+    }
+
+    // Pillage: package-private seam so tests can inject fetchers; the first fetcher is the authoritative one (Mojang)
+    AuthenticPremiumProvider(AuthenticLibreLogin<?, ?> plugin, List<ThrowableFunction<String, PremiumUser, PremiumException>> injectedFetchers) {
         this.plugin = plugin;
         userCache = Caffeine.newBuilder()
                 .expireAfterWrite(10, TimeUnit.MINUTES)
                 .build();
+
+        if (injectedFetchers != null) {
+            fetchers = List.copyOf(injectedFetchers);
+            return;
+        }
 
         fetchers = new ArrayList<>(3);
 
@@ -58,7 +68,16 @@ public class AuthenticPremiumProvider implements PremiumProvider {
                 var fetcher = fetchers.get(i);
 
                 try {
-                    return fetcher.apply(x);
+                    // Pillage: only Mojang (fetcher 0) may say a name is free. A fallback answering "no such name"
+                    // is treated as a failure, so an outage can never turn a premium name into a cracked one.
+                    // Nothing is cached on failure: the loader returns null and Caffeine does not store null.
+                    var fetched = fetcher.apply(x);
+                    if (fetched != null || i == 0) return fetched;
+                    if (i == fetchers.size() - 1) {
+                        exceptionToThrow[0] = new PremiumException(PremiumException.Issue.SERVER_EXCEPTION, "Mojang API unavailable and the fallback API did not find " + finalName + "; not trusting a fallback 'not found'");
+                    } else {
+                        plugin.getLogger().warn("Fallback API did not find premium user " + finalName + ", not trusting it. Trying the next one.");
+                    }
                 } catch (PremiumException e) {
                     if (i == fetchers.size() - 1) {
                         exceptionToThrow[0] = e;

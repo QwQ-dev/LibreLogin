@@ -62,6 +62,7 @@ repositories {
     maven { url = uri("https://repo.papermc.io/repository/maven-public/") }
     maven { url = uri("https://hub.spigotmc.org/nexus/") }
     maven { url = uri("https://repo.kyngs.xyz/public/") }
+    maven { url = uri("https://repo.kyngs.xyz/releases/") } // Pillage: libby 1.6.0 moved here from /public/
     maven { url = uri("https://mvn.exceptionflug.de/repository/exceptionflug-public/") }
     maven { url = uri("https://repo.dmulloy2.net/repository/public/") }
     maven { url = uri("https://repo.alessiodp.com/releases/") }
@@ -108,6 +109,9 @@ java {
 
 tasks.withType<Jar> {
     from("../LICENSE.txt")
+    // Pillage: reproducible jar (same sources -> same sha256)
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
 }
 
 libby {
@@ -118,6 +122,9 @@ libby {
 
     // Often redeploys the same version, so calculating checksum causes false flags
     noChecksumDependency("com.github.retrooper.packetevents:.*:.*")
+
+    // Pillage: the upstream 0.24.0 release does not download this compile-time annotations jar; keep libby.json identical
+    excludeDependency("org.jetbrains:annotations:.*")
 }
 
 configurations.all {
@@ -175,7 +182,7 @@ dependencies {
     compileOnly("net.luckperms:api:5.4")
 
     //Bungeecord
-    compileOnly("net.md-5:bungeecord-api:1.21-R0.1-SNAPSHOT")
+    compileOnly("net.md-5:bungeecord-api:1.21-R0.1") // Pillage: the -SNAPSHOT is no longer published; compile-only, same API
     compileOnly("com.github.ProxioDev.ValioBungee:RedisBungee-Bungee:0.12.5")
     libby("net.kyori:adventure-platform-bungeecord:4.1.2")
 
@@ -200,6 +207,21 @@ dependencies {
 
     //NanoLimboPlugin
     compileOnly("com.github.bivashy.NanoLimboPlugin:api:1.0.8")
+
+    // Pillage: unit tests for the Pillage patch (test scope only, nothing is shaded)
+    testImplementation(platform("org.junit:junit-bom:5.11.3"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("org.mockito:mockito-core:5.14.2")
+}
+
+// Pillage: tests run against the libraries LibreLogin downloads at runtime and the platform APIs
+configurations.testImplementation {
+    extendsFrom(configurations.compileOnly.get())
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.withType<ProcessResources> {
