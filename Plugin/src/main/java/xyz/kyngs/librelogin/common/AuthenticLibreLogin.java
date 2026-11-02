@@ -6,6 +6,8 @@
 
 package xyz.kyngs.librelogin.common;
 
+import xyz.kyngs.librelogin.common.util.RelayAddressList;
+
 import co.aikar.commands.CommandIssuer;
 import co.aikar.commands.CommandManager;
 import com.google.common.collect.HashMultimap;
@@ -115,6 +117,7 @@ public abstract class AuthenticLibreLogin<P, S> implements LibreLoginPlugin<P, S
     private DatabaseConnector<?, ?> databaseConnector;
     private AuthenticEMailHandler eMailHandler;
     private LoginTryListener<P, S> loginTryListener;
+    private RelayAddressList relayAddresses; // Pillage: the network's global relay list, see RelayAddressList
 
     protected AuthenticLibreLogin() {
         cryptoProviders = new ConcurrentHashMap<>();
@@ -157,6 +160,13 @@ public abstract class AuthenticLibreLogin<P, S> implements LibreLoginPlugin<P, S
 
     public void registerDatabaseConnector(DatabaseConnectorRegistration<?, ?> registration, Class<?> clazz) {
         databaseConnectors.put(clazz, registration);
+    }
+
+    /**
+     * Pillage: whether this address, as the proxy sees it after haproxy-protocol, is a listed relay shared by many players.
+     */
+    public boolean relayedAddress(String address) {
+        return relayAddresses != null && relayAddresses.contains(address);
     }
 
     @Override
@@ -263,6 +273,11 @@ public abstract class AuthenticLibreLogin<P, S> implements LibreLoginPlugin<P, S
         }
 
         eventProvider = new AuthenticEventProvider<>(this);
+        // Pillage: read at the login thread; only ever narrows what an address is trusted with (see sessionHolds)
+        relayAddresses = new RelayAddressList(RelayAddressList.SOURCE, getDataFolder().toPath().resolve("relay-addresses.last-good"),
+                System::currentTimeMillis, Runnable::run, logger::info, logger::warn);
+        logger.info("Relay addresses: " + relayAddresses.entries());
+
         premiumProvider = new AuthenticPremiumProvider(this);
 
         registerCryptoProvider(new MessageDigestCryptoProvider("SHA-256"));

@@ -1,4 +1,4 @@
-# LibreLogin 0.24.0-pillage.1
+# LibreLogin 0.24.0-pillage.2
 
 A minimal security patch of LibreLogin 0.24.0 (upstream tag `0.24.0`, commit `5cae5bd`) for the Pillage
 network's Velocity proxy (new-uuid-creator=MOJANG, auto-register=true, profile-conflict-resolution BLOCK).
@@ -35,13 +35,22 @@ Every source change is marked with `// Pillage:`. LibreLogin is MPL-2.0; the lic
    account owns N now (stale-name takeover). This also makes change 3 safe for premium rows.
    Velocity only; the Paper and BungeeCord listeners are unchanged.
 
-5. **Version** `0.24.0-pillage.1` (root `build.gradle`). `SemanticVersion.parse` cannot read the suffix, so
+5. **Relay addresses** (new `common/util/RelayAddressList`, `AuthenticLibreLogin.relayedAddress`,
+   `AuthenticListeners.sessionHolds`, `LibreLoginCommand.onUserAlts`). The network's global relay list is read from
+   `/pillage-global/relay-addresses.txt` (a read-only host mount, re-read within seconds, last good kept in
+   `plugins/librelogin/relay-addresses.last-good`). For an address on it, as seen after haproxy-protocol:
+   `ip-limit` is not counted; a saved session is never honoured (everyone behind a relay shares the address, so a
+   session would hand any account to any relayed player; every login there asks for the password);
+   `/librelogin user alts` lists nobody. Nothing changes for any other address. The class is a copy of PillageCore's
+   `integration/relay/RelayAddressList`, differing only in its package.
+
+6. **Version** `0.24.0-pillage.2` (root `build.gradle`). `SemanticVersion.parse` cannot read the suffix, so
    `AuthenticLibreLogin.enable()` parses the version with `-pillage.N` stripped (0.24.0, not dev: the update check,
    metrics and the dev-build warning behave as in 0.24.0). The raw string keeps the suffix.
 
    Detecting the patch from another plugin:
    - `LibreLoginProvider#getLibreLogin().getVersion()` (API `LibreLoginPlugin.getVersion()`) returns
-     `"0.24.0-pillage.1"`; check `contains("-pillage")`. `getParsedVersion()` returns 0.24.0.
+     `"0.24.0-pillage.2"`; check `contains("-pillage")`. `getParsedVersion()` returns 0.24.0.
    - Velocity: `proxy.getPluginManager().getPlugin("librelogin").flatMap(c -> c.getDescription().getVersion())`.
    - Class marker: `xyz.kyngs.librelogin.velocity.PremiumProfileGuard` exists only in patched builds.
 

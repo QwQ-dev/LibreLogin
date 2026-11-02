@@ -28,6 +28,7 @@ import java.lang.management.ThreadInfo;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.concurrent.CompletionStage;
 
 import static xyz.kyngs.librelogin.common.AuthenticLibreLogin.DATE_TIME_FORMATTER;
@@ -492,7 +493,8 @@ public class LibreLoginCommand<P> extends StaffCommand<P> {
         return runAsync(() -> {
             var user = getUserOtherWiseInform(name);
 
-            var alts = getDatabaseProvider().getByIP(user.getIp());
+            // Pillage: everyone behind a listed relay shares its address; that makes none of them an alt
+            var alts = plugin.relayedAddress(user.getIp()) ? List.<User>of() : getDatabaseProvider().getByIP(user.getIp());
 
             if (alts.isEmpty()) {
                 audience.sendMessage(getMessage("info-no-alts"));

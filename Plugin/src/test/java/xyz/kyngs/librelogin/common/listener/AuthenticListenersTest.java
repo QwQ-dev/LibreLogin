@@ -253,4 +253,67 @@ class AuthenticListenersTest {
         assertEquals(PreLoginState.FORCE_ONLINE, result.state());
         verify(db, never()).insertUser(any());
     }
+
+    // --- Change 5: a listed relay is shared by everyone behind it ---
+
+    private static final InetAddress RELAY_ADDRESS = InetAddress.getLoopbackAddress();
+    private static final String RELAY = RELAY_ADDRESS.getHostAddress();
+
+    private void ipLimitReached() {
+        config.put(ConfigurationKeys.IP_LIMIT, 3);
+        when(db.getByIP(RELAY)).thenReturn(List.of(row("A", null), row("B", null), row("C", null)));
+    }
+
+    @Test
+    void theIpLimitStillHoldsForAnAddressThatIsNotARelay() throws PremiumException {
+        ipLimitReached();
+        var result = listeners.onPreLogin("Steve", RELAY_ADDRESS);
+        assertEquals(PreLoginState.DENIED, result.state());
+        assertEquals(message("kick-ip-limit"), result.message());
+        verify(db, never()).insertUser(any());
+    }
+
+    @Test
+    void aListedRelayIsNotCountedForTheIpLimit() throws PremiumException {
+        ipLimitReached();
+        when(plugin.relayedAddress(RELAY)).thenReturn(true);
+        var result = listeners.onPreLogin("Steve", RELAY_ADDRESS);
+        assertEquals(PreLoginState.FORCE_OFFLINE, result.state());
+        verify(db).insertUser(any());
+    }
+
+    /** A player who logged in a minute ago, from the relay; somebody now connects with that name from the same address. */
+    private AuthenticUser sessionOnTheRelay(Object player) {
+        config.put(ConfigurationKeys.SESSION_TIMEOUT, 3600L);
+        var user = new AuthenticUser(GeneralUtil.getCrackedUUIDFromName("Steve"), null, null, "Steve",
+                new Timestamp(System.currentTimeMillis()), new Timestamp(System.currentTimeMillis()), null, RELAY,
+                new Timestamp(System.currentTimeMillis() - 60_000), null, null);
+        var handle = mock(xyz.kyngs.librelogin.api.PlatformHandle.class);
+        when(handle.getUUIDForPlayer(player)).thenReturn(user.getUuid());
+        when(handle.getIP(player)).thenReturn(RELAY);
+        when(plugin.getPlatformHandle()).thenReturn(handle);
+        var serverHandler = mock(xyz.kyngs.librelogin.common.server.AuthenticServerHandler.class);
+        when(plugin.getServerHandler()).thenReturn(serverHandler);
+        when(plugin.getAuthorizationProvider()).thenReturn(mock(xyz.kyngs.librelogin.common.authorization.AuthenticAuthorizationProvider.class));
+        listeners = new AuthenticListeners<>(plugin);
+        return user;
+    }
+
+    @Test
+    void aSessionOnAnOrdinaryAddressStillLogsIn() {
+        var player = new Object();
+        var user = sessionOnTheRelay(player);
+        assertTrue(listeners.chooseServer(player, RELAY, user).key(), "control: the session holds");
+    }
+
+    @Test
+    void aSessionIsNeverHonouredBehindARelay() {
+        var player = new Object();
+        var user = sessionOnTheRelay(player);
+        when(plugin.relayedAddress(RELAY)).thenReturn(true);
+        assertFalse(listeners.chooseServer(player, RELAY, user).key(), "the login server, and the password");
+
+        listeners.onPostLogin(player, user);
+        verify(plugin.getAuthorizationProvider()).startTracking(user, player);
+    }
 }

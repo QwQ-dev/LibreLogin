@@ -52,7 +52,7 @@ public class AuthenticListeners<Plugin extends AuthenticLibreLogin<P, S>, P, S> 
         if (user.autoLoginEnabled()) {
             plugin.delay(() -> plugin.getPlatformHandle().getAudienceForPlayer(player).sendMessage(plugin.getMessages().getMessage("info-premium-logged-in")), 500);
             plugin.getEventProvider().fire(plugin.getEventTypes().authenticated, new AuthenticAuthenticatedEvent<>(user, player, plugin, AuthenticatedEvent.AuthenticationReason.PREMIUM));
-        } else if (sessionTime != null && user.getLastAuthentication() != null && ip.equals(user.getIp()) && user.getLastAuthentication().toLocalDateTime().plus(sessionTime).isAfter(LocalDateTime.now())) {
+        } else if (sessionHolds(user, ip, sessionTime)) {
             plugin.delay(() -> plugin.getPlatformHandle().getAudienceForPlayer(player).sendMessage(plugin.getMessages().getMessage("info-session-logged-in")), 500);
             plugin.getEventProvider().fire(plugin.getEventTypes().authenticated, new AuthenticAuthenticatedEvent<>(user, player, plugin, AuthenticatedEvent.AuthenticationReason.SESSION));
         } else {
@@ -222,8 +222,9 @@ public class AuthenticListeners<Plugin extends AuthenticLibreLogin<P, S>, P, S> 
                 ));
             }
 
+            // Pillage: everyone behind a listed relay shares its address, so counting accounts on it means nothing.
             var ipLimit = plugin.getConfiguration().get(ConfigurationKeys.IP_LIMIT);
-            if (ipLimit > 0) {
+            if (ipLimit > 0 && !plugin.relayedAddress(ip.getHostAddress())) {
                 var ipCount = plugin.getDatabaseProvider().getByIP(ip.getHostAddress()).size(); // Ideally, this should be a count query, but I'm too lazy to implement that and the performance impact is negligible.
 
                 if (ipCount >= ipLimit) {
@@ -309,10 +310,23 @@ public class AuthenticListeners<Plugin extends AuthenticLibreLogin<P, S>, P, S> 
             ip = platformHandle.getIP(player);
         }
 
-        if (fromFloodgate || user.autoLoginEnabled() || (sessionTime != null && user.getLastAuthentication() != null && ip.equals(user.getIp()) && user.getLastAuthentication().toLocalDateTime().plus(sessionTime).isAfter(LocalDateTime.now()))) {
+        if (fromFloodgate || user.autoLoginEnabled() || sessionHolds(user, ip, sessionTime)) {
             return new BiHolder<>(true, plugin.getServerHandler().chooseLobbyServer(user, player, true, false));
         } else {
             return new BiHolder<>(false, plugin.getServerHandler().chooseLimboServer(user, player));
         }
+    }
+
+    /**
+     * Pillage: a saved session is trusted by address, and everyone behind a listed relay shares its address: honouring
+     * one there would let any relayed player walk into any account that last logged in through the relay, with no
+     * password. Behind a relay every login asks for the password, whatever session-timeout says.
+     */
+    private boolean sessionHolds(User user, String ip, @Nullable Duration sessionTime) {
+        return sessionTime != null
+                && user.getLastAuthentication() != null
+                && ip.equals(user.getIp())
+                && !plugin.relayedAddress(ip)
+                && user.getLastAuthentication().toLocalDateTime().plus(sessionTime).isAfter(LocalDateTime.now());
     }
 }
